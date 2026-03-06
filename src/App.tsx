@@ -31,20 +31,39 @@ import {
   Gem,
   Target,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Mic,
+  MicOff,
+  Volume2,
+  DollarSign
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Transaction, FinancialStats, AIDecision, Bill, ApprovalRequest, Investor, TreasuryStrategy } from './types';
+import {
+  Transaction,
+  FinancialStats,
+  Bill,
+  ApprovalRequest,
+  Investor,
+  TreasuryStrategy,
+  ConversationChannel,
+  ConversationResponse,
+  AutonomousActionExecution,
+  AuditTimelineEvent
+} from './types';
 import Markdown from 'react-markdown';
-import { GoogleGenAI } from '@google/genai';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { ConversationWorkspace } from './components/ConversationWorkspace';
+import { ActionTimelinePanel as TimelinePanel } from './components/ActionTimelinePanel';
+import { GuardrailsPanel } from './components/GuardrailsPanel';
+import { OperationsCenter } from './components/OperationsCenter';
+import { ValueDashboard } from './components/ValueDashboard';
+import { apiFetch as sharedApiFetch } from './lib/apiClient';
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'simulations' | 'payments' | 'history' | 'bills' | 'approvals' | 'fundraising' | 'treasury'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'agent' | 'value' | 'simulations' | 'payments' | 'history' | 'bills' | 'approvals' | 'fundraising' | 'treasury'>('agent');
   const [stats, setStats] = useState<FinancialStats>({
     totalCash: 0,
     monthlyBurn: 0,
@@ -62,6 +81,11 @@ export default function App() {
   const [messages, setMessages] = useState<{ role: 'user' | 'ai', content: string }[]>([
     { role: 'ai', content: "Hello. I'm your Autonomous CFO. Phase 3 is active: Fully autonomous treasury management and AI-driven fundraising advisor are now online. How can I help you today?" }
   ]);
+  const [conversationId, setConversationId] = useState<string>('');
+  const [actionTimeline, setActionTimeline] = useState<AuditTimelineEvent[]>([]);
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [input, setInput] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -69,6 +93,7 @@ export default function App() {
   const [newInvestor, setNewInvestor] = useState({ name: '', firm: '', stage: '', focus: '', status: 'Contacted' });
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     fetchStats();
@@ -77,16 +102,38 @@ export default function App() {
     fetchApprovals();
     fetchInvestors();
     fetchTreasuryStrategies();
+    fetchActionTimeline();
     seedData();
+
+    const source = new EventSource('/api/realtime/stream');
+    source.addEventListener('audit', (event) => {
+      const parsed = JSON.parse((event as MessageEvent).data) as AuditTimelineEvent;
+      setActionTimeline((prev) => [parsed, ...prev].slice(0, 100));
+    });
+    return () => {
+      source.close();
+    };
   }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const apiFetch = sharedApiFetch;
+
+  const fetchActionTimeline = async () => {
+    try {
+      const res = await apiFetch('/api/actions/timeline');
+      const data = await res.json();
+      setActionTimeline(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/stats');
+      const res = await apiFetch('/api/stats');
       const data = await res.json();
       setStats(data);
     } catch (e) {
@@ -96,7 +143,7 @@ export default function App() {
 
   const fetchInvestors = async () => {
     try {
-      const res = await fetch('/api/investors');
+      const res = await apiFetch('/api/investors');
       const data = await res.json();
       setInvestors(data);
     } catch (e) {
@@ -106,7 +153,7 @@ export default function App() {
 
   const fetchTreasuryStrategies = async () => {
     try {
-      const res = await fetch('/api/treasury/strategies');
+      const res = await apiFetch('/api/treasury/strategies');
       const data = await res.json();
       setTreasuryStrategies(data);
     } catch (e) {
@@ -117,7 +164,7 @@ export default function App() {
   const handleFundraisingAnalysis = async () => {
     setIsAnalyzingFundraising(true);
     try {
-      const res = await fetch('/api/fundraising/analyze', {
+      const res = await apiFetch('/api/fundraising/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -138,7 +185,7 @@ export default function App() {
   const handleTreasuryOptimization = async () => {
     setIsOptimizingTreasury(true);
     try {
-      const res = await fetch('/api/treasury/optimize', {
+      const res = await apiFetch('/api/treasury/optimize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -160,7 +207,7 @@ export default function App() {
   const handleAddInvestor = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/api/investors', {
+      await apiFetch('/api/investors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...newInvestor, id: Math.random().toString(36).substr(2, 9) }),
@@ -176,7 +223,7 @@ export default function App() {
 
   const handleActivateStrategy = async (id: string) => {
     try {
-      await fetch(`/api/treasury/strategies/${id}/activate`, { method: 'POST' });
+      await apiFetch(`/api/treasury/strategies/${id}/activate`, { method: 'POST' });
       fetchTreasuryStrategies();
       setMessages(prev => [...prev, { role: 'ai', content: `Treasury strategy activated. Funds are being reallocated for optimal yield.` }]);
     } catch (err) {
@@ -187,7 +234,7 @@ export default function App() {
   const handleRunSimulation = async () => {
     setIsAiThinking(true);
     try {
-      const res = await fetch('/api/simulations/run', {
+      const res = await apiFetch('/api/simulations/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -209,7 +256,7 @@ export default function App() {
 
   const fetchTransactions = async () => {
     try {
-      const res = await fetch('/api/transactions');
+      const res = await apiFetch('/api/transactions');
       const data = await res.json();
       setTransactions(data);
     } catch (e) {
@@ -219,7 +266,7 @@ export default function App() {
 
   const fetchBills = async () => {
     try {
-      const res = await fetch('/api/bills');
+      const res = await apiFetch('/api/bills');
       const data = await res.json();
       setBills(data);
     } catch (e) {
@@ -229,7 +276,7 @@ export default function App() {
 
   const fetchApprovals = async () => {
     try {
-      const res = await fetch('/api/approvals');
+      const res = await apiFetch('/api/approvals');
       const data = await res.json();
       setApprovals(data);
     } catch (e) {
@@ -246,7 +293,7 @@ export default function App() {
     reader.onloadend = async () => {
       const base64Image = (reader.result as string).split(',')[1];
       try {
-        const res = await fetch('/api/bills/process', {
+        const res = await apiFetch('/api/bills/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ base64Image, fileName: file.name }),
@@ -269,7 +316,7 @@ export default function App() {
 
   const handleApprovalResponse = async (id: string, status: 'approved' | 'rejected') => {
     try {
-      await fetch(`/api/approvals/${id}/respond`, {
+      await apiFetch(`/api/approvals/${id}/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, note: `Responded via Dashboard` }),
@@ -282,45 +329,109 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!input.trim()) return;
-    const userMsg = input;
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
-    setInput('');
-    setIsAiThinking(true);
+  const speakText = (text: string) => {
+    if (!isVoiceMode || typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  };
 
+  const sendConversationTurn = async (content: string, channel: ConversationChannel) => {
+    setMessages((prev) => [...prev, { role: 'user', content }]);
+    setIsAiThinking(true);
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `You are an Autonomous CFO Multi-Agent System. 
-        Current Financial State:
-        - Total Cash: $${stats.totalCash}
-        - Monthly Burn: $${stats.monthlyBurn}
-        - Runway: ${stats.runwayMonths.toFixed(1)} months
-        - Pending Approvals: ${approvals.length}
-        - Recent Bills: ${JSON.stringify(bills.slice(0, 3))}
-        
-        User Query: ${userMsg}
-        
-        Act as:
-        1. Financial Analyst (Analyze trends)
-        2. Risk Manager (Identify threats)
-        3. Strategic Planner (Suggest actions)
-        
-        Provide a unified, professional response. Phase 3 is active, so you can discuss fundraising strategies, investor relations, and treasury optimization.`,
+      const res = await apiFetch('/api/conversation/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: content,
+          channel,
+          conversationId
+        })
       });
-      
-      setMessages(prev => [...prev, { role: 'ai', content: response.text || "I'm processing your request." }]);
+      const data = (await res.json()) as ConversationResponse;
+      if (!res.ok) {
+        throw new Error((data as any).error || 'Conversation request failed.');
+      }
+      setConversationId(data.conversationId);
+      setStats(data.stats);
+
+      const actionSummary = (data.actions || [])
+        .map((action: AutonomousActionExecution) => `- ${action.type}: ${action.status}`)
+        .join('\n');
+      const composedReply =
+        actionSummary.length > 0
+          ? `${data.reply}\n\nWhat I changed:\n${actionSummary}`
+          : data.reply;
+      setMessages((prev) => [...prev, { role: 'ai', content: composedReply || "I'm processing your request." }]);
+      if (channel === 'voice' || isVoiceMode) {
+        speakText(data.reply || 'Done.');
+      }
+      fetchActionTimeline();
+      fetchStats();
+      fetchApprovals();
+      fetchTreasuryStrategies();
+      fetchInvestors();
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'ai', content: "I encountered an error analyzing your data. Please try again." }]);
+      const message = (error as Error).message || 'I encountered an error analyzing your data.';
+      setMessages((prev) => [...prev, { role: 'ai', content: message }]);
     } finally {
       setIsAiThinking(false);
     }
   };
 
+  const handleSendMessage = async () => {
+    if (!input.trim()) return;
+    const userMsg = input;
+    setInput('');
+    await sendConversationTurn(userMsg, 'text');
+  };
+
+  const startVoiceCapture = () => {
+    const SpeechRecognitionApi = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionApi) {
+      setMessages((prev) => [...prev, { role: 'ai', content: 'Voice recognition is not supported in this browser.' }]);
+      return;
+    }
+
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+
+    const recognition = new SpeechRecognitionApi();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setIsListening(true);
+    recognition.continuous = true;
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+    recognition.onresult = async (event: any) => {
+      const transcript = event.results?.[0]?.[0]?.transcript || '';
+      if (transcript.trim()) {
+        await sendConversationTurn(transcript, 'voice');
+      }
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const stopVoiceCapture = () => {
+    const recognition = recognitionRef.current;
+    if (recognition) {
+      recognition.stop();
+      recognitionRef.current = null;
+      setIsListening(false);
+    }
+  };
+
   const seedData = async () => {
     try {
-      await fetch('/api/seed', { method: 'POST' });
+      await apiFetch('/api/seed', { method: 'POST' });
       fetchStats();
       fetchTransactions();
     } catch (e) {
@@ -340,6 +451,8 @@ export default function App() {
         </div>
 
         <nav className="flex-1 space-y-2">
+          <SidebarItem icon={<MessageSquare size={20} />} label="Agent" active={activeTab === 'agent'} onClick={() => setActiveTab('agent')} />
+          <SidebarItem icon={<DollarSign size={20} />} label="Value & ROI" active={activeTab === 'value'} onClick={() => setActiveTab('value')} />
           <SidebarItem icon={<Activity size={20} />} label="Overview" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} />
           <SidebarItem icon={<Zap size={20} />} label="Simulations" active={activeTab === 'simulations'} onClick={() => setActiveTab('simulations')} />
           <SidebarItem icon={<FileText size={20} />} label="Bills" active={activeTab === 'bills'} onClick={() => setActiveTab('bills')} />
@@ -397,6 +510,62 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto p-8 space-y-8">
           <AnimatePresence mode="wait">
+            {activeTab === 'agent' && (
+              <motion.div
+                key="agent"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-8"
+              >
+                <div>
+                  <h2 className="text-3xl font-bold tracking-tight">Human CFO Agent Workspace</h2>
+                  <p className="text-white/40 mt-1">Voice-first interaction, live decisions, guardrails, and autonomous operations.</p>
+                </div>
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+                  <div className="xl:col-span-2">
+                    <ConversationWorkspace
+                      messages={messages}
+                      input={input}
+                      setInput={setInput}
+                      onSend={handleSendMessage}
+                      isThinking={isAiThinking}
+                      chatEndRef={chatEndRef}
+                      isVoiceMode={isVoiceMode}
+                      isListening={isListening}
+                      isSpeaking={isSpeaking}
+                      onToggleVoiceMode={() => setIsVoiceMode((prev) => !prev)}
+                      onStartVoice={startVoiceCapture}
+                      onStopVoice={stopVoiceCapture}
+                    />
+                  </div>
+                  <div className="space-y-6">
+                    <TimelinePanel events={actionTimeline.slice(0, 12)} />
+                    <GuardrailsPanel />
+                    <OperationsCenter />
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'value' && (
+              <motion.div
+                key="value"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-8"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-3xl font-bold tracking-tight">Value & ROI</h2>
+                    <p className="text-white/40 mt-1">Track the savings your CFO delivers and the fee you pay.</p>
+                  </div>
+                </div>
+                <ValueDashboard />
+              </motion.div>
+            )}
+
             {activeTab === 'overview' && (
               <motion.div 
                 key="overview"
@@ -535,7 +704,15 @@ export default function App() {
                       onSend={handleSendMessage} 
                       isThinking={isAiThinking} 
                       chatEndRef={chatEndRef}
+                      isVoiceMode={isVoiceMode}
+                      isListening={isListening}
+                      isSpeaking={isSpeaking}
+                      onToggleVoiceMode={() => setIsVoiceMode((prev) => !prev)}
+                      onStartVoice={startVoiceCapture}
+                      onStopVoice={stopVoiceCapture}
                     />
+
+                    <ActionTimelinePanel events={actionTimeline.slice(0, 8)} />
                   </div>
                 </div>
               </motion.div>
@@ -1005,6 +1182,7 @@ function PaymentForm() {
   const elements = useElements();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const ownerToken = (import.meta.env.VITE_OWNER_TOKEN || localStorage.getItem('owner_token') || '').trim();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1014,7 +1192,11 @@ function PaymentForm() {
     try {
       const res = await fetch('/api/payments/create-intent', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-owner-role': 'owner',
+          ...(ownerToken ? { 'x-owner-token': ownerToken } : {})
+        },
         body: JSON.stringify({ amount: 5000 }), // $50.00 for demo
       });
       const { clientSecret } = await res.json();
@@ -1136,14 +1318,75 @@ function SimulationItem({ title, impact, risk, color }: { title: string, impact:
   );
 }
 
-function ChatInterface({ messages, input, setInput, onSend, isThinking, chatEndRef }: any) {
+function ActionTimelinePanel({ events }: { events: AuditTimelineEvent[] }) {
+  return (
+    <div className="bg-[#0F0F11] border border-white/5 rounded-3xl p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-bold">What I changed</h3>
+        <span className="text-[10px] uppercase tracking-widest text-white/30">Live audit</span>
+      </div>
+      <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+        {events.length === 0 ? (
+          <p className="text-sm text-white/30">No autonomous actions yet.</p>
+        ) : (
+          events.map((event) => (
+            <div key={event.id} className="p-3 rounded-xl bg-white/5 border border-white/5">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-bold uppercase tracking-widest text-white/40">{event.event_type.replaceAll('_', ' ')}</p>
+                <span className="text-[10px] text-white/30">{new Date(event.created_at).toLocaleTimeString()}</span>
+              </div>
+              <p className="text-sm">{event.status}</p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatInterface({
+  messages,
+  input,
+  setInput,
+  onSend,
+  isThinking,
+  chatEndRef,
+  isVoiceMode,
+  isListening,
+  isSpeaking,
+  onToggleVoiceMode,
+  onStartVoice,
+  onStopVoice
+}: any) {
   return (
     <div className="bg-[#0F0F11] border border-white/5 rounded-3xl flex flex-col h-[500px]">
-      <div className="p-6 border-b border-white/5 flex items-center gap-3">
-        <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
-          <MessageSquare size={16} className="text-black" />
+      <div className="p-6 border-b border-white/5 flex items-center gap-3 justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+            <MessageSquare size={16} className="text-black" />
+          </div>
+          <h3 className="font-bold">CFO Assistant</h3>
         </div>
-        <h3 className="font-bold">CFO Assistant</h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onToggleVoiceMode}
+            className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${
+              isVoiceMode ? 'bg-indigo-500/30 text-indigo-300 border border-indigo-400/30' : 'bg-white/5 text-white/40'
+            }`}
+          >
+            <Volume2 size={14} className="inline mr-1" />
+            Voice {isVoiceMode ? 'On' : 'Off'}
+          </button>
+          <button
+            onClick={isListening ? onStopVoice : onStartVoice}
+            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+              isListening ? 'bg-red-500/20 text-red-400' : 'bg-white/5 text-white/60 hover:bg-white/10'
+            }`}
+            title={isListening ? 'Stop listening' : 'Start listening'}
+          >
+            {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
+        </div>
       </div>
       
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -1167,6 +1410,13 @@ function ChatInterface({ messages, input, setInput, onSend, isThinking, chatEndR
                 <div className="w-1 h-1 bg-white/40 rounded-full animate-bounce [animation-delay:0.4s]" />
               </div>
               Analyzing data...
+            </div>
+          </div>
+        )}
+        {isSpeaking && (
+          <div className="flex justify-start">
+            <div className="bg-indigo-500/10 text-indigo-300 p-3 rounded-2xl text-xs border border-indigo-500/20">
+              Speaking response...
             </div>
           </div>
         )}

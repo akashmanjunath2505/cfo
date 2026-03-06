@@ -76,3 +76,113 @@ export interface TreasuryStrategy {
   status: 'Active' | 'Inactive' | 'Proposed';
   last_executed?: string;
 }
+
+export type ConversationChannel = 'text' | 'voice';
+
+export type AutonomousActionType =
+  | 'allocate_research_budget'
+  | 'activate_treasury_strategy'
+  | 'respond_approval'
+  | 'create_investor'
+  | 'run_simulation';
+
+export interface AutonomousActionExecution {
+  id: string;
+  type: AutonomousActionType;
+  status: 'planned' | 'executing' | 'completed' | 'failed' | 'reverted' | 'blocked';
+  rationale: string;
+  confidence: number;
+  expectedImpactUsd: number;
+  actualImpactUsd: number;
+  rollback: { action: string; parameters: Record<string, unknown> };
+  metadata?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface ConversationResponse {
+  conversationId: string;
+  correlationId?: string;
+  reply: string;
+  actions: AutonomousActionExecution[];
+  stats: FinancialStats;
+}
+
+export interface AuditTimelineEvent {
+  id: string;
+  correlation_id?: string;
+  created_at: string;
+  event_type: string;
+  actor: string;
+  status: string;
+  payload: Record<string, unknown>;
+}
+
+export interface GuardrailsConfig {
+  autonomyEnabled: boolean;
+  killSwitch: boolean;
+  maxSingleAllocationUsd: number;
+  allowedActions: string[];
+  disabledDomains: string[];
+}
+
+export interface ExternalOperationResult {
+  correlationId: string;
+  ok: boolean;
+  provider: string;
+  detail: string;
+}
+
+export type ValueCategory =
+  | 'budget_optimization'
+  | 'treasury_yield'
+  | 'cost_avoidance'
+  | 'bill_negotiation'
+  | 'time_savings'
+  | 'revenue_recovery';
+
+export interface ValueLedgerEntry {
+  id: string;
+  correlation_id: string;
+  action_type: string;
+  category: ValueCategory;
+  description: string;
+  gross_value_usd: number;
+  verified: boolean;
+  verified_at: string | null;
+  created_at: string;
+  billing_period: string;
+  billed: boolean;
+}
+
+export interface BillingPeriod {
+  id: string;
+  period_start: string;
+  period_end: string;
+  gross_value_usd: number;
+  fee_percentage: number;
+  fee_amount_usd: number;
+  stripe_invoice_id: string | null;
+  status: 'open' | 'closed' | 'invoiced' | 'paid';
+}
+
+export interface ValueSummary {
+  currentPeriod: BillingPeriod;
+  grossValueUsd: number;
+  feePercentage: number;
+  feeAmountUsd: number;
+  categoryBreakdown: Record<ValueCategory, number>;
+  entryCount: number;
+  verifiedCount: number;
+  entries: ValueLedgerEntry[];
+}
+
+export interface Opportunity {
+  id: string;
+  category: ValueCategory;
+  title: string;
+  description: string;
+  estimated_value_usd: number;
+  status: 'open' | 'acted' | 'dismissed';
+  created_at: string;
+  acted_at: string | null;
+}
