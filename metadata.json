@@ -1,0 +1,5 @@
+{
+  "name": "Autonomous CFO",
+  "description": "An AI-powered financial operating system that autonomously manages capital allocation, forecasts cash flow, and optimizes company spending.",
+  "requestFramePermissions": ["microphone"]
+}
